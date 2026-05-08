@@ -15,7 +15,8 @@
 # specific language governing permissions and limitations
 # under the License.
 """Default legalization function for vision network related operators."""
-from tvm import relax, te, tir, topi
+
+from tvm import relax, te, tirx, topi
 
 from ...block_builder import BlockBuilder
 from ...expr import Call, Expr, TupleGetItem
@@ -31,11 +32,15 @@ def _all_class_non_max_suppression(block_builder: BlockBuilder, call: Call) -> E
 
     Returns
     -------
-    result : Tuple[Tensor, Tensor]
-        A tuple of (trimmed_indices, num_total_detections) where:
-        - trimmed_indices: Tensor of shape (num_total_detections, 3) containing only
-          valid detection indices (batch_id, class_id, box_id)
-        - num_total_detections: Tensor of shape (1,) with the count of valid detections
+    result : Expr
+        The legalized NMS result.
+
+        - For ONNX output format, returns a tuple of
+          `(trimmed_indices, num_total_detections)`, where `trimmed_indices`
+          contains only valid detection indices.
+        - For TensorFlow output format, returns the TOPI result directly to
+          preserve the `(selected_indices, selected_scores, num_detections)`
+          layout expected by the Relax op.
     """
     boxes = call.args[0]
     scores = call.args[1]
@@ -68,25 +73,26 @@ def _all_class_non_max_suppression(block_builder: BlockBuilder, call: Call) -> E
         output_format,
     )
 
-    # Dynamic output trimming using dynamic_strided_slice
-    # Extract selected_indices and num_total_detections from the NMS result
+    if output_format == "tensorflow":
+        return nms_result
+
     selected_indices = block_builder.emit(TupleGetItem(nms_result, 0))
     num_total_detections = block_builder.emit(TupleGetItem(nms_result, 1))
 
     # Build slicing parameters using TE to avoid high-level Relax ops during legalization
     def build_begin():
-        return te.compute((2,), lambda i: tir.const(0, "int64"), name="begin")
+        return te.compute((2,), lambda i: tirx.const(0, "int64"), name="begin")
 
     def build_strides():
-        return te.compute((2,), lambda i: tir.const(1, "int64"), name="strides")
+        return te.compute((2,), lambda i: tirx.const(1, "int64"), name="strides")
 
     def build_end(count_tensor):
         # end = [count_tensor[0], 3]
         def compute_end(i):
-            return tir.if_then_else(
+            return tirx.if_then_else(
                 i == 0,
-                tir.Cast("int64", count_tensor[0]),
-                tir.const(3, "int64"),
+                tirx.Cast("int64", count_tensor[0]),
+                tirx.const(3, "int64"),
             )
 
         return te.compute((2,), compute_end, name="end")
@@ -102,3 +108,86 @@ def _all_class_non_max_suppression(block_builder: BlockBuilder, call: Call) -> E
 
     # Return trimmed indices along with num_total_detections for compatibility
     return relax.Tuple([trimmed_indices, num_total_detections])
+
+
+@register_legalize("relax.vision.roi_align")
+def _roi_align(bb: BlockBuilder, call: Call) -> Expr:
+    return bb.call_te(
+        topi.vision.roi_align,
+        call.args[0],
+        call.args[1],
+        pooled_size=call.attrs.pooled_size,
+        spatial_scale=call.attrs.spatial_scale,
+        mode=call.attrs.mode,
+        sample_ratio=call.attrs.sample_ratio,
+        aligned=call.attrs.aligned,
+        layout=call.attrs.layout,
+    )
+
+
+@register_legalize("relax.vision.get_valid_counts")
+def _get_valid_counts(block_builder: BlockBuilder, call: Call) -> Expr:
+    return block_builder.call_te(
+        topi.vision.get_valid_counts,
+        call.args[0],
+        score_threshold=call.attrs.score_threshold,
+        id_index=call.attrs.id_index,
+        score_index=call.attrs.score_index,
+    )
+
+
+@register_legalize("relax.vision.non_max_suppression")
+def _non_max_suppression(block_builder: BlockBuilder, call: Call) -> Expr:
+    return block_builder.call_te(
+        topi.vision.non_max_suppression,
+        call.args[0],
+        call.args[1],
+        call.args[2],
+        max_output_size=call.attrs.max_output_size,
+        iou_threshold=call.attrs.iou_threshold,
+        force_suppress=call.attrs.force_suppress,
+        top_k=call.attrs.top_k,
+        coord_start=call.attrs.coord_start,
+        score_index=call.attrs.score_index,
+        id_index=call.attrs.id_index,
+        return_indices=call.attrs.return_indices,
+        invalid_to_bottom=call.attrs.invalid_to_bottom,
+        soft_nms_sigma=call.attrs.soft_nms_sigma,
+        score_threshold=call.attrs.score_threshold,
+    )
+
+
+@register_legalize("relax.vision.roi_pool")
+def _roi_pool(bb: BlockBuilder, call: Call) -> Expr:
+    return bb.call_te(
+        topi.vision.roi_pool,
+        call.args[0],
+        call.args[1],
+        pooled_size=call.attrs.pooled_size,
+        spatial_scale=call.attrs.spatial_scale,
+        layout=call.attrs.layout,
+    )
+
+
+@register_legalize("relax.vision.multibox_transform_loc")
+def _multibox_transform_loc(bb: BlockBuilder, call: Call) -> Expr:
+    variances = tuple(float(x) for x in call.attrs.variances)
+
+    def _te(cls_pred, loc_pred, anchor):
+        return topi.vision.multibox_transform_loc(
+            cls_pred,
+            loc_pred,
+            anchor,
+            variances,
+            clip=call.attrs.clip,
+            threshold=call.attrs.threshold,
+            keep_background=call.attrs.keep_background,
+        )
+
+    return bb.call_te(
+        _te,
+        call.args[0],
+        call.args[1],
+        call.args[2],
+        primfunc_name_hint="multibox_transform_loc",
+    )

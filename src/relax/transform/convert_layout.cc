@@ -21,13 +21,14 @@
  * \brief Automatic layout conversion pass, especially for axis swapping.
  */
 
+#include <tvm/ffi/cast.h>
+#include <tvm/ffi/extra/serialization.h>
 #include <tvm/ffi/reflection/registry.h>
-#include <tvm/node/serialization.h>
 #include <tvm/relax/expr_functor.h>
 #include <tvm/relax/nested_msg.h>
 #include <tvm/relax/op_attr_types.h>
 #include <tvm/relax/transform.h>
-#include <tvm/tir/index_map.h>
+#include <tvm/tirx/index_map.h>
 
 #include "../op/tensor/manipulate.h"
 #include "infer_layout_utils.h"
@@ -36,8 +37,8 @@
 namespace tvm {
 namespace relax {
 
-using tir::IndexMap;
-using tir::Layout;
+using tirx::IndexMap;
+using tirx::Layout;
 using LayoutCb = tvm::relax::transform::LayoutCb;
 
 /*!
@@ -94,14 +95,14 @@ class LayoutConvertMutator : public ExprMutator {
   }
 
   IndexMap LayoutIndexMap(int ndim, const Layout& src_layout, const Layout& desired_layout) {
-    tir::BijectiveLayout todesired(src_layout, desired_layout);
+    tirx::BijectiveLayout todesired(src_layout, desired_layout);
     ffi::Optional<IndexMap> inverse_index_map;
 
-    ffi::Array<tvm::tir::Var> initial_indices;
+    ffi::Array<tvm::tirx::Var> initial_indices;
     ffi::Array<PrimExpr> initial_indices_expr;
     initial_indices.reserve(ndim);
     for (int i = 0; i < ndim; ++i) {
-      auto var = tvm::tir::Var("i" + std::to_string(i), DataType::Int(32));
+      auto var = tvm::tirx::Var("i" + std::to_string(i), DataType::Int(32));
       initial_indices.push_back(var);
       initial_indices_expr.push_back(var);
     }
@@ -114,11 +115,11 @@ class LayoutConvertMutator : public ExprMutator {
       NLayout from = layouts[0], to = layouts[1];
       if (NLayoutEqual()(from, to) || layouts[0].LeafValue()->layout.name() == "") return expr;
       // If not both from and to are unknown, then none of them can be unknown.
-      ICHECK(!NLayoutEqual()(from, LayoutDecision::InitUnknownDim()) &&
-             !NLayoutEqual()(to, LayoutDecision::InitUnknownDim()))
+      TVM_FFI_ICHECK(!NLayoutEqual()(from, LayoutDecision::InitUnknownDim()) &&
+                     !NLayoutEqual()(to, LayoutDecision::InitUnknownDim()))
           << "Cannot convert when exactly one of the layouts is unknown";
       const auto* tensor = GetStructInfoAs<TensorStructInfoNode>(expr);
-      ICHECK(tensor != nullptr) << "Expect a tensor, but got: " << expr;
+      TVM_FFI_ICHECK(tensor != nullptr) << "Expect a tensor, but got: " << expr;
 
       if (from.LeafValue()->layout.ndim() == to.LeafValue()->layout.ndim()) {
         Layout axes = TransposeLike(InitialLayoutDecision(tensor->ndim)->layout,
@@ -127,10 +128,10 @@ class LayoutConvertMutator : public ExprMutator {
       } else {
         auto index_map = LayoutIndexMap(from.LeafValue()->layout.ndim(), from.LeafValue()->layout,
                                         to.LeafValue()->layout);
-        ObjectPtr<LayoutTransformAttrs> attrs = ffi::make_object<LayoutTransformAttrs>();
+        ffi::ObjectPtr<LayoutTransformAttrs> attrs = ffi::make_object<LayoutTransformAttrs>();
         ffi::Array<IntImm> axis_separator;
         ffi::Array<IntImm> input_axis_separator;
-        attrs->index_map = Downcast<IndexMap>(LoadJSON(SaveJSON(index_map)));
+        attrs->index_map = Downcast<IndexMap>(ffi::FromJSONGraph(ffi::ToJSONGraph(index_map)));
         attrs->axis_separators = std::move(axis_separator);
         attrs->input_axis_separators = std::move(input_axis_separator);
         const Op& layout_transform_op_ = Op::Get("relax.layout_transform");
@@ -149,7 +150,7 @@ class LayoutConvertMutator : public ExprMutator {
     // contains tensor arguments.  The number of tensor arguments in
     // `args` should match the full extent of `to`.
 
-    ICHECK_LE(to.size(), args.size());
+    TVM_FFI_ICHECK_LE(to.size(), args.size());
 
     std::vector<Expr> new_args;
     for (size_t i = 0; i < args.size(); ++i) {
@@ -226,7 +227,7 @@ class LayoutConvertMutator : public ExprMutator {
   void VisitBinding_(const VarBindingNode* binding, const CallNode* call_node) final {
     ffi::Optional<InferLayoutOutput> res =
         GetInferLayoutInfo(call_node, desired_layouts_, layout_cb_, var_layout_map_);
-    ObjectPtr<CallNode> new_call = ffi::make_object<CallNode>(*call_node);
+    ffi::ObjectPtr<CallNode> new_call = ffi::make_object<CallNode>(*call_node);
     new_call->struct_info_ = std::nullopt;
     if (!res.defined() ||
         (!IsNestedTensor(binding->var) && !binding->var->IsInstance<DataflowVarNode>())) {
@@ -258,7 +259,7 @@ class LayoutConvertMutator : public ExprMutator {
         var_layout_map_[binding->var] = res.value()->output_layouts[0];
       } else {
         // Global var (tensor), we rewrite it to initial layout
-        ICHECK(IsNestedTensor(binding->var));
+        TVM_FFI_ICHECK(IsNestedTensor(binding->var));
         if (!NLayoutEqual()(res.value()->output_layouts[0], InitialNLayout(binding->var))) {
           Var new_var = builder_->Emit(cur_call);
           var_layout_map_[new_var] = res.value()->output_layouts[0];
@@ -310,15 +311,15 @@ class LayoutConvertMutator : public ExprMutator {
       NLayout from = layouts[0], to = layouts[1];
       if (NLayoutEqual()(from, to)) return sinfo;
       // If not both from and to are unknown, then none of them can be unknown.
-      ICHECK(!NLayoutEqual()(from, LayoutDecision::InitUnknownDim()) &&
-             !NLayoutEqual()(to, LayoutDecision::InitUnknownDim()))
+      TVM_FFI_ICHECK(!NLayoutEqual()(from, LayoutDecision::InitUnknownDim()) &&
+                     !NLayoutEqual()(to, LayoutDecision::InitUnknownDim()))
           << "Cannot convert when exactly one of the layouts is unknown";
       const TensorStructInfoNode* tsinfo = sinfo.as<TensorStructInfoNode>();
-      ICHECK(tsinfo != nullptr) << "We can not set layout for non-tensor struct";
+      TVM_FFI_ICHECK(tsinfo != nullptr) << "We can not set layout for non-tensor struct";
       if (!tsinfo->shape.defined()) return sinfo;
       const ShapeExprNode* shape = tsinfo->shape.value().as<ShapeExprNode>();
       if (shape == nullptr) return sinfo;
-      ICHECK_EQ(shape->values.size(), to.LeafValue()->layout.ndim());
+      TVM_FFI_ICHECK_EQ(shape->values.size(), to.LeafValue()->layout.ndim());
       std::vector<PrimExpr> new_shape;
       for (size_t i = 0; i < shape->values.size(); ++i) {
         new_shape.push_back(

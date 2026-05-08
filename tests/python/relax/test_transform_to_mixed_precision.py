@@ -16,11 +16,14 @@
 # under the License.
 
 import numpy as np
+
 import tvm
-from tvm import relax
 import tvm.testing
+from tvm import relax
 from tvm.relax.transform import ToMixedPrecision
-from tvm.script.parser import ir as I, relax as R, tir as T
+from tvm.script.parser import ir as I
+from tvm.script.parser import relax as R
+from tvm.script.parser import tirx as T
 
 
 def _assert_test(input, expected=None, expected2=None):
@@ -1054,7 +1057,7 @@ def test_call_tir_with_float16_args():
             Output: T.Buffer(64, "float16"),
         ):
             for i in range(64):
-                with T.block("copy"):
+                with T.sblock("copy"):
                     vi = T.axis.remap("S", [i])
                     Output[vi] = Input[vi]
 

@@ -21,10 +21,11 @@
  * \file tvm/arith/const_int_bound.cc
  */
 #include <tvm/arith/analyzer.h>
+#include <tvm/ffi/cast.h>
 #include <tvm/ffi/function.h>
 #include <tvm/ffi/reflection/registry.h>
-#include <tvm/tir/builtin.h>
-#include <tvm/tir/expr_functor.h>
+#include <tvm/tirx/builtin.h>
+#include <tvm/tirx/expr_functor.h>
 
 #include <algorithm>
 #include <optional>
@@ -37,7 +38,7 @@
 namespace tvm {
 namespace arith {
 
-using namespace tir;
+using namespace tirx;
 
 TVM_FFI_STATIC_INIT_BLOCK() { ConstIntBoundNode::RegisterReflection(); }
 
@@ -67,15 +68,7 @@ inline void PrintBoundValue(std::ostream& os, int64_t val) {
   }
 }
 
-TVM_STATIC_IR_FUNCTOR(ReprPrinter, vtable)
-    .set_dispatch<ConstIntBoundNode>([](const ObjectRef& node, ReprPrinter* p) {
-      auto* op = static_cast<const ConstIntBoundNode*>(node.get());
-      p->stream << "ConstIntBound[";
-      PrintBoundValue(p->stream, op->min_value);
-      p->stream << ',';
-      PrintBoundValue(p->stream, op->max_value);
-      p->stream << ']';
-    });
+// Pattern A (RM): auto-default repr from reflection.
 
 // internal entry for const int bound
 struct ConstIntBoundAnalyzer::Entry {
@@ -129,7 +122,7 @@ class ConstIntBoundAnalyzer::Impl
     if (!allow_override) {
       auto it = var_map_.find(var);
       if (it != var_map_.end()) {
-        ICHECK(it->second == info)
+        TVM_FFI_ICHECK(it->second == info)
             << "Trying to update var \'" << var << "\'"
             << " with a different const bound: "
             << "original=" << ConstIntBound(it->second.min_value, it->second.max_value)
@@ -157,13 +150,13 @@ class ConstIntBoundAnalyzer::Impl
   }
 
   // Override visitor behaviors
-  Entry VisitExprDefault_(const Object* op) final {
+  Entry VisitExprDefault_(const ffi::Object* op) final {
     return Everything(static_cast<const PrimExprNode*>(op)->dtype);
   }
 
   Entry VisitExpr(const PrimExpr& expr) final {
     Entry res = ExprFunctor::VisitExpr(expr);
-    tir::ExprDeepEqual equal;
+    tirx::ExprDeepEqual equal;
     // a linear search over additional info
     // assume we won't have a lot of conditions
     for (const BoundInfo& info : additional_info_) {
@@ -175,7 +168,7 @@ class ConstIntBoundAnalyzer::Impl
       auto val = bound_->find(expr);
       if (val != bound_->end()) {
         auto everything = Everything(expr->dtype);
-        ICHECK(
+        TVM_FFI_ICHECK(
             (val->second->min_value == res.min_value && val->second->max_value == res.max_value) ||
             (val->second->min_value == everything.min_value &&
              val->second->max_value == everything.max_value))
@@ -226,7 +219,7 @@ class ConstIntBoundAnalyzer::Impl
    * \return The processed entry
    */
   Entry AssumeNoZeroDivisor(Entry divisor) {
-    ICHECK(!divisor.is_const(0)) << "Find divide by zero";
+    TVM_FFI_ICHECK(!divisor.is_const(0)) << "Find divide by zero";
     // NOTE: here we make the assumption that
     // divide by zero won't happen in a valid program
     // this is important for us to get a lot of symbolic shape bound right
@@ -234,7 +227,7 @@ class ConstIntBoundAnalyzer::Impl
     // when mod or divide of n occur, the intention is actually n > 0
     if (divisor.min_value == 0) {
       divisor.min_value = 1;
-      ICHECK_GE(divisor.max_value, 1);
+      TVM_FFI_ICHECK_GE(divisor.max_value, 1);
     }
     return divisor;
   }
@@ -316,7 +309,7 @@ class ConstIntBoundAnalyzer::Impl
                          std::min(std::max(a.max_value, (int64_t)0), b_max_cap));
       }
     } else {
-      ICHECK(!b.is_const(0)) << "mod by zero";
+      TVM_FFI_ICHECK(!b.is_const(0)) << "mod by zero";
       // mod by negative value is rare,
       // and we just use the simpliest rule.
       return Everything(op->dtype);
@@ -387,7 +380,7 @@ class ConstIntBoundAnalyzer::Impl
         return MakeBound(0, b_max_cap);
       }
     } else {
-      ICHECK(!b.is_const(0)) << "floormod by zero";
+      TVM_FFI_ICHECK(!b.is_const(0)) << "floormod by zero";
       int64_t b_min_cap = InfAwareAdd(b.min_value, 1);
       int64_t b_max_cap = InfAwareAdd(b.max_value, -1);
       return Intersect(MakeBound(std::min(static_cast<int64_t>(0), b_min_cap),
@@ -425,13 +418,13 @@ class ConstIntBoundAnalyzer::Impl
     // used for index calculation.
 
     auto curr_target = Target::Current();
-    if (op->op.same_as(tir::builtin::shift_right())) {
+    if (op->op.same_as(tirx::builtin::shift_right())) {
       return VisitRightShift(op);
-    } else if (op->op.same_as(tir::builtin::shift_left())) {
+    } else if (op->op.same_as(tirx::builtin::shift_left())) {
       return VisitLeftShift(op);
-    } else if (op->op.same_as(tir::builtin::bitwise_and())) {
+    } else if (op->op.same_as(tirx::builtin::bitwise_and())) {
       return VisitBitwiseAnd(op);
-    } else if (op->op.same_as(tir::builtin::vscale()) && TargetHasVLA(curr_target)) {
+    } else if (op->op.same_as(tirx::builtin::vscale()) && TargetHasVLA(curr_target)) {
       auto kVScaleValues = GetVScaleValues(curr_target);
       unsigned int max_val = *std::max_element(kVScaleValues.begin(), kVScaleValues.end());
       return MakeBound(1, max_val);
@@ -590,11 +583,11 @@ class ConstIntBoundAnalyzer::Impl
    */
   static int64_t InfAwareAdd(int64_t x, int64_t y) {
     if (x == kPosInf) {
-      ICHECK(y != kNegInf);
+      TVM_FFI_ICHECK(y != kNegInf);
       return kPosInf;
     }
     if (x == kNegInf) {
-      ICHECK(y != kPosInf);
+      TVM_FFI_ICHECK(y != kPosInf);
       return kNegInf;
     }
     if (y == kPosInf || y == kNegInf) return y;
@@ -622,7 +615,7 @@ class ConstIntBoundAnalyzer::Impl
    * \return the result.
    */
   static int64_t InfAwareDiv(int64_t x, int64_t y) {
-    ICHECK_NE(y, 0);
+    TVM_FFI_ICHECK_NE(y, 0);
     if (x == kPosInf || x == kNegInf) {
       if (y > 0) return x;
       return -x;
@@ -636,7 +629,7 @@ class ConstIntBoundAnalyzer::Impl
    * \return the result.
    */
   static int64_t InfAwareFloorDiv(int64_t x, int64_t y) {
-    ICHECK_NE(y, 0);
+    TVM_FFI_ICHECK_NE(y, 0);
     if (x == kPosInf || x == kNegInf) {
       if (y > 0) return x;
       return -x;
@@ -807,10 +800,10 @@ class ConstIntBoundAnalyzer::Impl
   static ffi::Optional<PrimExpr> FindCeilLog2Arg(const CastNode* op) {
     if (op->dtype.is_int()) {
       if (auto as_call = op->value.as<CallNode>()) {
-        if (as_call->op.same_as(Op::Get("tir.ceil"))) {
+        if (as_call->op.same_as(Op::Get("tirx.ceil"))) {
           PrimExpr ceil_arg = as_call->args[0];
           if (auto arg_call = ceil_arg.as<CallNode>()) {
-            if (arg_call->op.same_as(Op::Get("tir.log2"))) {
+            if (arg_call->op.same_as(Op::Get("tirx.log2"))) {
               PrimExpr log_arg = arg_call->args[0];
               return log_arg;
             }

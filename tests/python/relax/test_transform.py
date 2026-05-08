@@ -14,14 +14,17 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
+# ruff: noqa: F841
 
 import pytest
+
 import tvm
+import tvm.script
 import tvm.testing
 from tvm import relax
-
-import tvm.script
-from tvm.script import ir as I, tir as T, relax as R
+from tvm.script import ir as I
+from tvm.script import relax as R
+from tvm.script import tirx as T
 
 
 def test_to_non_dataflow():
@@ -278,9 +281,9 @@ def test_call_tir_inplace_simple():
         @T.prim_func
         def zeros(A: T.Buffer((2, 3), "int32")):
             # just overwrites A with 0s
-            T.func_attr({"tir.noalias": True})
+            T.func_attr({"tirx.noalias": True})
             for i0, i1 in T.grid(T.int64(2), T.int64(3)):
-                with T.block("T_zeros"):
+                with T.sblock("T_zeros"):
                     ax0, ax1 = T.axis.remap("SS", [i0, i1])
                     T.writes(A[ax0, ax1])
                     A[ax0, ax1] = T.int32(0)
@@ -296,9 +299,9 @@ def test_call_tir_inplace_simple():
     class Expected:
         @T.prim_func
         def zeros(A: T.Buffer((2, 3), "int32")):
-            T.func_attr({"tir.noalias": True})
+            T.func_attr({"tirx.noalias": True})
             for i0, i1 in T.grid(T.int64(2), T.int64(3)):
-                with T.block("T_zeros"):
+                with T.sblock("T_zeros"):
                     ax0, ax1 = T.axis.remap("SS", [i0, i1])
                     T.writes(A[ax0, ax1])
                     A[ax0, ax1] = T.int32(0)
@@ -322,9 +325,9 @@ def test_call_tir_inplace_multiple_args():
             A: T.Buffer((2, 3), "int32"), B: T.Buffer((2, 3), "int32"), C: T.Buffer((2, 3), "int32")
         ):
             # copies the contents of C into A and B
-            T.func_attr({"tir.noalias": True})
+            T.func_attr({"tirx.noalias": True})
             for i0, i1 in T.grid(T.int64(2), T.int64(3)):
-                with T.block("T_zeros"):
+                with T.sblock("T_zeros"):
                     ax0, ax1 = T.axis.remap("SS", [i0, i1])
                     T.reads(C[ax0, ax1])
                     T.writes(A[ax0, ax1], B[ax0, ax1])
@@ -351,9 +354,9 @@ def test_call_tir_inplace_multiple_args():
             A: T.Buffer((2, 3), "int32"), B: T.Buffer((2, 3), "int32"), C: T.Buffer((2, 3), "int32")
         ):
             # copies the contents of C into A and B
-            T.func_attr({"tir.noalias": True})
+            T.func_attr({"tirx.noalias": True})
             for i0, i1 in T.grid(T.int64(2), T.int64(3)):
-                with T.block("T_zeros"):
+                with T.sblock("T_zeros"):
                     ax0, ax1 = T.axis.remap("SS", [i0, i1])
                     T.reads(C[ax0, ax1])
                     T.writes(A[ax0, ax1], B[ax0, ax1])
@@ -385,9 +388,9 @@ def test_call_tir_inplace_some_new():
             out2: T.Buffer((2, 3), "int32"),
         ):
             # copies the contents of C into A, out1, and out2
-            T.func_attr({"tir.noalias": True})
+            T.func_attr({"tirx.noalias": True})
             for i0, i1 in T.grid(T.int64(2), T.int64(3)):
-                with T.block("T_zeros"):
+                with T.sblock("T_zeros"):
                     ax0, ax1 = T.axis.remap("SS", [i0, i1])
                     T.reads(C[ax0, ax1])
                     T.writes(A[ax0, ax1], out1[ax0, ax1], out2[ax0, ax1])
@@ -424,9 +427,9 @@ def test_call_tir_inplace_some_new():
             out1: T.Buffer((2, 3), "int32"),
             out2: T.Buffer((2, 3), "int32"),
         ):
-            T.func_attr({"tir.noalias": True})
+            T.func_attr({"tirx.noalias": True})
             for i0, i1 in T.grid(T.int64(2), T.int64(3)):
-                with T.block("T_zeros"):
+                with T.sblock("T_zeros"):
                     ax0, ax1 = T.axis.remap("SS", [i0, i1])
                     T.reads(C[ax0, ax1])
                     T.writes(A[ax0, ax1], out1[ax0, ax1], out2[ax0, ax1])

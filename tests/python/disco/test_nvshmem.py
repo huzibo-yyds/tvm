@@ -14,30 +14,31 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
+# ruff: noqa: F401, F841
 """Basic tests for a Disco nvshmem support"""
-# pylint: disable=missing-docstring
-import numpy as np
-import pytest
 
+# pylint: disable=missing-docstring
+import multiprocessing
 import shutil
 import subprocess
 import sys
 import tempfile
 import threading
-import multiprocessing
+from collections.abc import Callable
 from multiprocessing import Process
-from typing import Any, Callable, List
+from typing import Any
 
-from tvm.script import ir as I
-from tvm.script import relax as R
-from tvm.script import tir as T
-
+import numpy as np
+import pytest
+from tvm_ffi import Shape
 
 import tvm
 import tvm.testing
-from tvm.runtime import ShapeTuple
-from tvm.runtime import disco as di
 from tvm.exec import disco_worker as _  # pylint: disable=unused-import
+from tvm.runtime import disco as di
+from tvm.script import ir as I
+from tvm.script import relax as R
+from tvm.script import tirx as T
 
 _SOCKET_SESSION_TESTER = None
 
@@ -72,7 +73,7 @@ class SocketSessionTester:
 
         cmd = "tvm.exec.disco_remote_socket_session"
         self.remote_nodes = []
-        for _ in range(num_nodes - 1):
+        for _i in range(num_nodes - 1):
             self.remote_nodes.append(
                 subprocess.Popen(
                     [
@@ -132,8 +133,8 @@ def test_nvshmem_empty(session_kind: di.Session, num_workers: int):
     init_dfunc(uid, num_workers, 0)
     sess.sync_worker_0()
     empty_dfunc = sess.get_global_func("runtime.disco.nvshmem.empty")
-    a = empty_dfunc(ShapeTuple((32, 64)), "float32", device)
-    b = empty_dfunc(ShapeTuple((64, 32)), "float32", device)
+    a = empty_dfunc(Shape((32, 64)), "float32", device)
+    b = empty_dfunc(Shape((64, 32)), "float32", device)
     sess.sync_worker_0()
     finalize_dfunc = sess.get_global_func("runtime.disco.nvshmem.finalize_nvshmem")
     finalize_dfunc()
@@ -157,7 +158,7 @@ def test_nvshmem_compile():
     def main(A: T.Buffer((8, 16), "float32"), B: T.Buffer((16, 8), "float32")):
         for i in T.thread_binding(T.int64(8), thread="threadIdx.y"):
             for j in T.thread_binding(T.int64(16), thread="threadIdx.x"):
-                with T.block("T_transpose"):
+                with T.sblock("T_transpose"):
                     v0 = T.axis.spatial(T.int64(8), i)
                     v1 = T.axis.spatial(T.int64(16), j)
                     T.reads(A[v0, v1])
@@ -226,7 +227,7 @@ def _test_nvshmem_kernel_compile_impl():
                 my_pe_out: T.Buffer((1,), "int32"),
                 n_pes_out: T.Buffer((1,), "int32"),
             ):
-                with T.block("root"):
+                with T.sblock("root"):
                     T.reads()
                     T.writes(my_pe_out[0:1], n_pes_out[0:1])
                     T.call_kernel(
@@ -266,12 +267,12 @@ def _test_nvshmem_kernel_compile_impl():
                 my_pe_result, n_pes_result = result.debug_get_from_remote(worker_id)
                 my_pe_val = my_pe_result.numpy()[0]
                 n_pes_val = n_pes_result.numpy()[0]
-                assert (
-                    my_pe_val == worker_id
-                ), f"Worker {worker_id} reported my_pe={my_pe_val}, expected {worker_id}"
-                assert (
-                    n_pes_val == num_workers
-                ), f"Worker {worker_id} reported n_pes={n_pes_val}, expected {num_workers}"
+                assert my_pe_val == worker_id, (
+                    f"Worker {worker_id} reported my_pe={my_pe_val}, expected {worker_id}"
+                )
+                assert n_pes_val == num_workers, (
+                    f"Worker {worker_id} reported n_pes={n_pes_val}, expected {num_workers}"
+                )
 
             # Sync all workers before cleanup
             sess._sync_all()
@@ -297,7 +298,7 @@ def test_nvshmem_kernel_compile_nvcc():
 def test_nvshmem_kernel_compile_nvrtc():
     """Test NVSHMEM kernel compilation with nvrtc."""
     try:
-        from cuda.bindings import nvrtc  # noqa: F401
+        from cuda.bindings import nvrtc
     except ImportError:
         pytest.skip("cuda-python not available, skipping nvrtc test")
 
@@ -325,9 +326,9 @@ if __name__ == "__main__":
                 p.start()
                 p.join()
                 # Ensure the process finished successfully
-                assert (
-                    p.exitcode == 0
-                ), f"Test {test_func.__name__} failed with exit code {p.exitcode}"
+                assert p.exitcode == 0, (
+                    f"Test {test_func.__name__} failed with exit code {p.exitcode}"
+                )
 
     p = Process(target=test_nvshmem_compile)
     p.start()
