@@ -1,0 +1,10 @@
+=== Before ===
+def @main(%x: Tensor[(4), float32]) {
+  multiply(%x, 2f)
+}
+
+=== After ===
+def @main(%x: Tensor[(4), float32] /* ty=Tensor[(4), float32] */) -> Tensor[(4), float32] {
+  add(%x, %x) /* ty=Tensor[(4), float32] */
+}
+
