@@ -8,3 +8,33 @@ def @main(%x: Tensor[(4), float32] /* ty=Tensor[(4), float32] */) -> Tensor[(4),
   add(%x, %x) /* ty=Tensor[(4), float32] */
 }
 
+
+Pass执行逻辑：
+MyOptimizePass
+    -> transform_function(func)
+        -> Mul2ToAdd().visit(func)
+            -> 遍历函数体
+            -> 遇到 Call
+            -> visit_call
+            -> multiply(x, 2.0) 改成 add(x, x)
+
+整体执行逻辑：
+import tvm / relay
+    ↓
+定义 ExprMutator: Mul2ToAdd
+    ↓
+定义 FunctionPass: MyOptimizePass
+    ↓
+构造 Relay IR: x * 2.0
+    ↓
+打印 Before
+    ↓
+执行 Sequential:
+    1. InferType
+    2. MyOptimizePass
+        - 遍历 Relay Function
+        - 找到 multiply(x, 2.0)
+        - 替换成 add(x, x)
+    3. InferType
+    ↓
+打印 After
