@@ -1,5 +1,8 @@
+import numpy as np
+
 import tvm
 from tvm import relay
+from tvm.contrib import graph_executor
 from tvm.relay import ExprMutator
 
 
@@ -97,3 +100,48 @@ with tvm.transform.PassContext(opt_level=3):
 
 print("=== After ===")
 print(mod_opt)
+
+
+target = "llvm"
+
+with tvm.transform.PassContext(opt_level=3):
+    lib = relay.build(mod_opt, target=target) # 编译成可执行 runtime module
+
+dev = tvm.cpu(0)
+module = graph_executor.GraphModule(lib["default"](dev))
+
+input_data = np.array([1, 2, 3, 4], dtype="float32")
+module.set_input("x", input_data)
+module.run()
+
+out = module.get_output(0).numpy()
+print(out)
+
+
+'''
+relay.build 内部流程：
+Relay Function
+    ↓
+Relay 优化
+    ↓
+FuseOps
+    ↓
+TECompiler
+    ↓
+查 add 的 Op Strategy
+    ↓
+找到 add 在 llvm target 上的实现
+    ↓
+调用 TOPI compute
+    ↓
+调用 schedule
+    ↓
+Lower 到 TIR (TIR 是 TVM 更底层的循环 IR)
+    ↓
+TIR 优化
+    ↓
+LLVM codegen
+    ↓
+生成 CPU 可执行代码
+
+'''

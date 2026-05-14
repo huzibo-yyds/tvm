@@ -38,3 +38,16 @@ import tvm / relay
     3. InferType
     ↓
 打印 After
+
+
+=== Before ===
+def @main(%x: Tensor[(4), float32]) {
+  multiply(%x, 2f)
+}
+
+=== After ===
+def @main(%x: Tensor[(4), float32] /* ty=Tensor[(4), float32] */) -> Tensor[(4), float32] {
+  add(%x, %x) /* ty=Tensor[(4), float32] */
+}
+
+[2. 4. 6. 8.]
