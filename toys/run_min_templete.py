@@ -19,12 +19,13 @@ mod, params = relay.frontend.from_onnx(
 
 # 2. 编译
 with tvm.transform.PassContext(opt_level=3):
-    lib = relay.build(mod, target=target, params=params)
+    lib = relay.build(mod, target=target, params=params) # ！！ Relay IR 编译成可运行产物
 
 # 3. 创建运行时
 module = graph_executor.GraphModule(lib["default"](dev))
 
 # 4. 设置输入并运行
+input_data='xxx'
 module.set_input("x", input_data)
 module.run()
 

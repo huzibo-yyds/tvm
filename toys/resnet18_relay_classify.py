@@ -174,7 +174,16 @@ def main() -> None:
     '---------------------------------------------------'
     target = "llvm"
     print("Compiling with relay.build for llvm")
+    
+    print("\n=== IR BEFORE Optimization ===")
+    print(mod)
+    
     with tvm.transform.PassContext(opt_level=3):
+        # 提早手动调用一次优化，仅仅是为了拿出来打印看看
+        opt_mod, _ = relay.optimize(mod, target=target, params=params)
+        print("\n=== IR AFTER Optimization ===")
+        print(opt_mod)
+        
         lib = relay.build(mod, target=target, params=params) # Relay 的 `relay.build` 返回的通常是一个 factory module
         # 编译+生成可执行runtime
 
