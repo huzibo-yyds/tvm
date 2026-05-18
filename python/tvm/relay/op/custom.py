@@ -29,4 +29,12 @@ def layer_norm(data, gamma, beta, axis=-1, epsilon=1e-5, center=True, scale=True
     """
 
     return _custom_make.layer_norm(data, gamma, beta, axis, epsilon, center, scale)
+
+
+def numpy_layer_norm(data, gamma, beta, axis=-1, epsilon=1e-5, center=True, scale=True):
+    """LayerNorm operator backed by a Python NumPy PackedFunc at runtime."""
+
+    return _custom_make.numpy_layer_norm(data, gamma, beta, axis, epsilon, center, scale)
+
+
 # hzb 将TVM注册的全局函数映射为Python函数

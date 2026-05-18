@@ -18,6 +18,7 @@
 
 from __future__ import absolute_import
 
+import tvm
 from tvm import te
 from tvm.target import generic_func
 
@@ -42,4 +43,48 @@ def schedule_custom_layer_norm(attrs, outs, target):
 
 
 reg.register_schedule("custom.layer_norm", schedule_custom_layer_norm)
+
+
+# 📌 本次修改关键地方
+@reg.register_compute("custom.numpy_layer_norm")
+def compute_custom_numpy_layer_norm(attrs, inputs, out_type):
+    """Lower custom.numpy_layer_norm to te.extern + runtime PackedFunc.
+
+    The math is intentionally not expressed as TE here.  The generated TIR
+    calls back into Python through:
+
+        custom.runtime.numpy_layer_norm(data, gamma, beta, out, axis, epsilon)
+    """
+
+    data, gamma, beta = inputs
+    axis = int(attrs.axis)
+    epsilon = float(attrs.epsilon)
+    return [
+        te.extern(
+            out_type.shape,
+            [data, gamma, beta],
+            lambda ins, outs: tvm.tir.call_packed(
+                "custom.runtime.numpy_layer_norm",
+                ins[0],
+                ins[1],
+                ins[2],
+                outs[0],
+                axis,
+                epsilon,
+            ),
+            name="custom_numpy_layer_norm",
+            dtype=out_type.dtype,
+        )
+    ]
+
+
+@generic_func
+def schedule_custom_numpy_layer_norm(attrs, outs, target):
+    """Schedule for the extern NumPy-backed LayerNorm op."""
+
+    with target:
+        return te.create_schedule([out.op for out in outs])
+
+# 注册调度
+reg.register_schedule("custom.numpy_layer_norm", schedule_custom_numpy_layer_norm)
 # hzb 注册
