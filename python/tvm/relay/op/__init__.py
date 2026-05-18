@@ -47,6 +47,7 @@ from . import image
 from . import vision
 from . import op_attrs
 from . import random
+from . import custom
 
 
 # operator registry
@@ -56,6 +57,7 @@ from . import _transform
 from . import _reduce
 from . import _algorithm
 from . import _math
+from . import _custom
 
 
 def _register_op_make():
